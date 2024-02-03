@@ -18,7 +18,7 @@ KNS_CTRL_PORT = 60000
 
 def cat_id(username, password):
     ''' Format an adminstrator ID login command '''
-    return f'ID0{len(username):02}{len(password):02}{username}{password};'
+    return f'##ID0{len(username):02}{len(password):02}{username}{password};'
 
 #--------------------------------------------------------------
 # TS-890 class
@@ -90,16 +90,34 @@ async def fetch_from_ts890(queue: Queue, ts890: Ts890):
     reader, writer = await asyncio.open_connection(ts890.host, KNS_CTRL_PORT)
 
     # Start connection to TS-890 by sending ##CN;
-
+    print('Sending CN')
+    writer.write('##CN;'.encode())
+    await writer.drain()
     # Read response ##CNx; (x=1 ok, x=0 connection refused)
+    resp = await reader.readuntil(separator=b';')
 
-    # Send ##ID
-    print(cat_id(ts890.user, ts890.password))
+    if resp.decode() == '##CN1;':
+        # Send ##ID
+        print('Sending ID')
+        writer.write(cat_id(ts890.user, ts890.password).encode())
+        await writer.drain()
+        # Read response ##IDx; (x=1 ok, x=0 connection refused)
+        print('waiting resp')
+        resp = await reader.readuntil(separator=b';')
 
-    # Read response ##IDx; (x=1 ok, x=0 connection refused)
+        if resp.decode() == '##ID1;':
+            # Turn on auto information AI2;
+            print('Sending AI')
+            writer.write('AI2;'.encode())
+            await writer.drain()
 
+            while True:
+                try:
+                    resp = await reader.readuntil(separator=b';')
+                    print(resp.decode())
+                except asyncio.IncompleteReadError as err:
+                    pass
 
-    # Turn on auto information AI2;
 
     # does bandscope params get output as BSx;???
 
