@@ -82,6 +82,48 @@ async def send_to_n1mm(queue: Queue, n1mm_host):
 # Interface to TS-890
 #--------------------------------------------------------------
 
+def handle_cat_bs(resp):
+    ''' Handle a BSx cat response '''
+    print(f'BSx rx: {resp}')
+
+def handle_info(cat_msg):
+    ''' Handle received messages from the TS-890 '''
+    # CAT response handlers
+    resp_handlers = {
+        'BS': handle_cat_bs
+    }
+    # Non-error messages are at least 3 characters in length
+    # "XX...;" or "##XX...;" for LAN commands
+    if len(cat_msg) > 2:
+        # Extract CAT command
+        cmd = cat_msg[:2]
+        if cmd == '##':
+            cmd = cat_msg[:4]
+        # Call command handler, otherwise ignore
+        if cmd in resp_handlers:
+            resp_handlers[cmd](cat_msg)
+    else:
+        # Handle error responses
+        print(f'ERROR: {cat_msg}')
+
+async def handle_ai_cat(reader):
+    ''' Coroutine to wait for AI CAT messages and handle them '''
+    while True:
+        try:
+            resp = await reader.readuntil(separator=b';')
+            handle_info(resp.decode())
+        except asyncio.IncompleteReadError as err:
+            pass
+
+async def do_heartbeat(writer):
+    ''' Coroutine to send regular heartbeat CAT cmds to TS-890 '''
+    while True:
+        # Might as well poll something useful - get bandscope mode
+        writer.write('BS3;'.encode())
+        await writer.drain()
+        # Wait 5 seconds
+        await asyncio.sleep(5)
+
 async def fetch_from_ts890(queue: Queue, ts890: Ts890):
     ''' Coroutine to connect to TS-890, read spectrum data
         and save it in the queue
@@ -110,22 +152,32 @@ async def fetch_from_ts890(queue: Queue, ts890: Ts890):
             print('Sending AI')
             writer.write('AI2;'.encode())
             await writer.drain()
+            # Poll for required info
+            writer.write('BS3;'.encode())
+            await writer.drain()
+            writer.write('BS4;'.encode())
+            await writer.drain()
+            writer.write('BSM;'.encode())
+            await writer.drain()
+            # Run the AI response handler and heartbeat coroutines
+            await asyncio.gather(
+                    handle_ai_cat(reader),
+                    do_heartbeat(writer)
+            )
 
-            while True:
-                try:
-                    resp = await reader.readuntil(separator=b';')
-                    print(resp.decode())
-                except asyncio.IncompleteReadError as err:
-                    pass
 
+    # BS3; reads bandscope mode (centre/fixed/auto)
 
-    # does bandscope params get output as BSx;???
+    #  FA; or FB; read receiver freq (for centre mode)
+    #  BS4; reads bandscope span (for centre mode)
+    # or:
+    #  BSM; reads bandscope upper/lower freqs for fixed mode and auto scroll
 
 
 
-    # Enable bandscope LAN output ##DD0
+    # Enable bandscope LAN output DD0
 
-    # Receive one line of data, 32 x DD2
+    # Receive one line of data (640 points) ##DD2
 
 #--------------------------------------------------------------
 # Main
