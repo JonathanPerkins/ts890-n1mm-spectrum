@@ -161,3 +161,6 @@ cython_debug/
 
 # MacOS users
 .DS_Store
+
+# Command line options file
+*.cfg

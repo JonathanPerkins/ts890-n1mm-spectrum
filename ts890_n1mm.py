@@ -482,7 +482,7 @@ async def main(ts890, n1mm):
         pass
 
 if __name__ == '__main__':
-    PARSER = argparse.ArgumentParser()
+    PARSER = argparse.ArgumentParser(fromfile_prefix_chars='@')
 
     PARSER.add_argument('-t', '--ts890',
                         required=True,
