@@ -18,6 +18,34 @@ KNS_CTRL_PORT = 60000
 N1MM_SPECTRUM_PORT = 13064
 
 #--------------------------------------------------------------
+# Helper classes
+#--------------------------------------------------------------
+
+class AppException(Exception):
+    ''' Exception for script errors '''
+    def __init__(self, value, additional='', context=''):
+        self._context = context
+        self._additional = additional
+        super(Exception, self).__init__(value)
+
+    def add_context(self, context_str):
+        ''' Add a further context string to the exception arguments '''
+        if not self._context:
+            self._context = context_str
+        else:
+            self._context = f"{context_str}: {self._context}"
+
+    @property
+    def context(self):
+        ''' Getter for context '''
+        return self._context
+
+    @property
+    def additional(self):
+        ''' Getter for additional info '''
+        return self._additional
+
+#--------------------------------------------------------------
 # TS-890 CAT command helpers
 #--------------------------------------------------------------
 
@@ -36,9 +64,10 @@ class Ts890:
         self._user = user
         self._password = password
         self._bs_mode = None
-        self._bs_span = None
+        self._bs_span_hz = None
         self._bs_lower_hz = None
         self._bs_upper_hz = None
+        self._receiver_vfo = None
 
     @property
     def host(self):
@@ -63,51 +92,75 @@ class Ts890:
     @bs_mode.setter
     def bs_mode(self, mode):
         ''' Sets the bandscope mode '''
-        if mode >=0 and mode < 4 and mode != self._bs_mode:
-            modes = ['centre', 'fixed', 'auto scroll']
+        modes = ['centre', 'fixed', 'auto scroll']
+        if  0 <= mode < len(modes) and mode != self._bs_mode:
             self._bs_mode = mode
             print(f'Bandscope {modes[mode]} mode')
-            # TODO centre mode not yet supported, invalidate freqs
-            if self._bs_mode == 0:
+            # Centre mode: invalidate freqs until VFO read
+            if self.is_centre_mode:
                 self._bs_lower_hz = None
                 self._bs_upper_hz = None
+    @property
+    def is_centre_mode(self):
+        ''' True if bandscope is in centre mode '''
+        return self._bs_mode == 0
 
     @property
     def bs_lower_hz(self):
         ''' Returns the bandscope lower edge frequency in Hz '''
         return self._bs_lower_hz
     @bs_lower_hz.setter
-    def bs_lower_hz(self, hz):
+    def bs_lower_hz(self, lower_hz):
         ''' Sets bandscope lower frequency in Hz (Integer) '''
-        self._bs_lower_hz = hz
+        self._bs_lower_hz = lower_hz
 
     @property
     def bs_upper_hz(self):
         ''' Returns the bandscope upper edge frequency in Hz '''
         return self._bs_upper_hz
     @bs_upper_hz.setter
-    def bs_upper_hz(self, hz):
+    def bs_upper_hz(self, upper_hz):
         ''' Sets bandscope upper frequency in Hz (Integer) '''
-        self._bs_upper_hz = hz
+        self._bs_upper_hz = upper_hz
 
     @property
-    def bs_span(self):
+    def bs_span_hz(self):
         ''' Returns the bandscope span '''
-        return self._bs_span
-    @bs_span.setter
-    def bs_span(self, span):
+        return self._bs_span_hz
+    @bs_span_hz.setter
+    def bs_span_hz(self, span):
         ''' Sets the bandscope span '''
-        self._bs_span = span
+        spans = [5000, 10000, 20000, 30000, 50000, 100000, 200000, 500000]
+        if 0 <= span < len(spans) and span != self._bs_span_hz:
+            self._bs_span_hz = spans[span]
+            print(f'Bandscope span {self._bs_span_hz}Hz')
+
+    @property
+    def receiver_vfo(self):
+        ''' Returns the receiver VFO source '''
+        return self._receiver_vfo
+    @receiver_vfo.setter
+    def receiver_vfo(self, vfo):
+        ''' Sets the receiver VFO source '''
+        rx_vfo = ['VFO A', 'VFO B', 'Memory channel']
+        if 0 <= vfo < len(rx_vfo) and vfo != self._receiver_vfo:
+            self._receiver_vfo = vfo
+            print(f'Receiver {rx_vfo[vfo]}')
+    @property
+    def vfo_a_active(self):
+        ''' True if VFO A is active '''
+        return self._receiver_vfo == 0
+    @property
+    def vfo_b_active(self):
+        ''' True if VFO B is active '''
+        return self._receiver_vfo == 1
 
     def has_all_required_info(self):
         ''' Returns True if all the required information
             to send spectrum information to N1MM is present,
             False otherwise.
         '''
-        if self._bs_lower_hz and self._bs_upper_hz:
-            return True
-        else:
-            return False
+        return self._bs_lower_hz and self._bs_upper_hz
 
 #--------------------------------------------------------------
 # Spectrum data class
@@ -147,49 +200,50 @@ class SpectrumData:
 #--------------------------------------------------------------
 
 class N1mmSpectrumProtocol:
+    ''' Protocol implementation for UDP connection to N1MM '''
+    def __init__(self):
+        self.transport = None
+
     def connection_made(self, transport):
+        ''' UDP transport has been created '''
         self.transport = transport
-        print('connection made')
 
     def connection_lost(self, exc):
+        ''' Mandatory connection_lost method '''
         # The socket has been closed
-        print(f'connection lost: {exc}')
+        print(f'N1MM transport closed: {exc}')
 
     def datagram_received(self, data, addr):
+        ''' UDP datagram received callback '''
         message = data.decode()
         # Not expecting anything back from N1MM, but
         # log it if we do
-        print('Received %r from %s' % (message, addr))
+        print(f'Received {message} from {addr}')
 
 async def send_to_n1mm(queue: Queue, n1mm_host):
     ''' Coroutine to read spectrum data from the queue
         and send to N1MM.
     '''
-
     loop = asyncio.get_running_loop()
-
     transport, protocol = await loop.create_datagram_endpoint(
         lambda: N1mmSpectrumProtocol(),
         remote_addr=(n1mm_host, N1MM_SPECTRUM_PORT))
-
     try:
         while True:
-            sd: SpectrumData = await queue.get()
+            sdata: SpectrumData = await queue.get()
             # Build the XML structure
             try:
                 spectrum = ET.Element('Spectrum')
                 ET.SubElement(spectrum, 'Name').text='TS-890'
-                ET.SubElement(spectrum, 'LowScopeFrequency').text=str(int(sd.lower_hz/1000))
-                ET.SubElement(spectrum, 'HighScopeFrequency').text=str(int(sd.upper_hz/1000))
+                # Frequencies rounded to nearest kHz
+                ET.SubElement(spectrum, 'LowScopeFrequency').text=str(sdata.lower_hz/1000)
+                ET.SubElement(spectrum, 'HighScopeFrequency').text=str(sdata.upper_hz/1000)
                 ET.SubElement(spectrum, 'ScalingFactor').text='0.5'
-                ET.SubElement(spectrum, 'DataCount').text=str(sd.num_data_points)
-                ET.SubElement(spectrum, 'SpectrumData').text=','.join(map(str,sd.data))
-                xml_str = ET.tostring(spectrum,
-                                      encoding='utf8',
-                                      xml_declaration=r'<\?xml version="1.0" encoding="utf-8"\?>')
+                ET.SubElement(spectrum, 'DataCount').text=str(sdata.num_data_points)
+                ET.SubElement(spectrum, 'SpectrumData').text=','.join(map(str, sdata.data))
+                xml_str = ET.tostring(spectrum, encoding='utf8', xml_declaration=True)
                 # print(f'{xml_str[:300].decode()}')
                 await transport.sendto(xml_str)
-                print('sent')
             except TypeError:
                 pass
             queue.task_done()
@@ -217,7 +271,7 @@ class Ts890Connection:
             if cmd == 'BSM':
                 # BSM0.. contains the current bandscope edges, but not
                 # for centre mode.
-                if ts890.bs_mode != 0 and len(resp) == 21 and resp[3] == '0':
+                if not self._ts890.is_centre_mode and len(resp) == 21 and resp[3] == '0':
                     # extract edge frequencies
                     try:
                         self._ts890.bs_lower_hz = int(resp[4:12])
@@ -227,15 +281,18 @@ class Ts890Connection:
             elif cmd == 'BS3':
                 try:
                     self._ts890.bs_mode = int(resp[3])
+                    # Now in centre mode?
+                    if self._ts890.is_centre_mode:
+                        # Find out which VFO is active so new bandscope
+                        # edge frequencies can be calculated
+                        await self._send_cmd('FR;')
                 except ValueError:
                     print(f'error extracting mode from {resp}')
             elif cmd == 'BS4':
                 try:
-                    self._ts890.bs_span = resp[3]
+                    self._ts890.bs_span_hz = int(resp[3])
                 except ValueError:
                     print(f'error extracting span from {resp}')
-            else:
-                print(f'Unhandled BSx rx: {resp}')
 
     async def _handle_cat_dd(self, resp):
         ''' Handle a ##DDx cat response '''
@@ -252,18 +309,49 @@ class Ts890Connection:
                     else:
                         val = 0
                     data.append(val)
-                sd = SpectrumData(self._ts890, data)
-                await self._queue.put(sd)
+                sdata = SpectrumData(self._ts890, data)
+                await self._queue.put(sdata)
             except ValueError:
                 print('Failed to parse bandscope data')
         else:
             print(f'Ignoring unexpected ##DD: {resp}')
+
+    async def _handle_cat_fr(self, resp):
+        ''' Handle a FRx; cat response '''
+        if len(resp) == 4:
+            try:
+                self._ts890.receiver_vfo = int(resp[2])
+                # If centre mode is active, make sure we have the
+                # current active VFO frequency.
+                if self._ts890.is_centre_mode:
+                    if self._ts890.vfo_a_active:
+                        await self._send_cmd('FA;')
+                    elif self._ts890.vfo_b_active:
+                        await self._send_cmd('FB;')
+            except ValueError:
+                print(f'error extracting RX from {resp}')
+
+    async def _handle_cat_fa_fb(self, resp):
+        ''' Handle a FAx or FBx cat response '''
+        # Only need VFO freq in bandscope centre mode
+        if self._ts890.is_centre_mode and len(resp) == 14:
+            # extract carrier frequency
+            try:
+                freq_hz = int(resp[2:13])
+                # Calculate and store the bandscope lower and upper frequnencies
+                self._ts890.bs_lower_hz = int(freq_hz - (self._ts890.bs_span_hz/2))
+                self._ts890.bs_upper_hz = int(freq_hz + (self._ts890.bs_span_hz/2))
+            except ValueError:
+                print(f'error extracting frequency from {resp}')
 
     async def _handle_info(self, cat_msg):
         ''' Handle received messages from the TS-890 '''
         # CAT response handlers
         resp_handlers = {
             'BS': self._handle_cat_bs,
+            'FR': self._handle_cat_fr,
+            'FA': self._handle_cat_fa_fb,
+            'FB': self._handle_cat_fa_fb,
             '##DD': self._handle_cat_dd
         }
         # Non-error messages are at least 3 characters in length
@@ -289,27 +377,35 @@ class Ts890Connection:
         ''' Wrapper for write and wait for response '''
         self._writer.write(cmd.encode())
         await self._writer.drain()
-        resp = await self._reader.readuntil(separator=b';')
-        if resp:
-            resp = resp.decode()
+        try:
+            resp = await self._reader.readuntil(separator=b';')
+            if resp:
+                resp = resp.decode()
+        except asyncio.IncompleteReadError as err:
+            resp = None
+            raise AppException(err, context='reading CAT response')
         return resp
 
     async def _do_cat_rx(self):
         ''' Coroutine to wait for CAT messages and handle them '''
+        bandscope_on = False
         while True:
             try:
                 resp = await self._reader.readuntil(separator=b';')
                 await self._handle_info(resp.decode())
                 # After each message is handled, determine if
-                # bandscope data cab be enabled/disabled
+                # bandscope data can be enabled/disabled
                 if self._ts890.has_all_required_info():
-                    # Enable bandscope data
-                    await self._send_cmd('DD03;')
-                else:
+                    if not bandscope_on:
+                        # Enable bandscope data
+                        await self._send_cmd('DD02;')
+                        bandscope_on = True
+                elif bandscope_on:
                     # Disable bandscope data
                     await self._send_cmd('DD00;')
+                    bandscope_on = False
             except asyncio.IncompleteReadError as err:
-                pass
+                raise AppException(err, context='reading CAT from TS-890')
 
     async def _do_heartbeat(self):
         ''' Coroutine to send regular heartbeat CAT cmds to TS-890 '''
@@ -323,46 +419,46 @@ class Ts890Connection:
         ''' Coroutine to connect to TS-890, read spectrum data
             and save it in the queue
         '''
-        print(f"Connecting to TS-890 {self._ts890.host}")
-        self._reader, self._writer = await asyncio.open_connection(self._ts890.host, KNS_CTRL_PORT)
+        try:
+            print(f"Connecting to TS-890 {self._ts890.host}")
+            self._reader, self._writer = await asyncio.wait_for(
+                asyncio.open_connection(self._ts890.host, KNS_CTRL_PORT),
+                10)
 
-        # Start connection to TS-890 by sending ##CN;
-        resp = await self._send_cmd_wait_response('##CN;')
-        # Response ##CNx; (x=1 ok, x=0 connection refused)
-        if resp == '##CN1;':
-            # Send ##ID & read response ##IDx; (x=1 ok, x=0 connection refused)
-            resp = await self._send_cmd_wait_response(cat_id(ts890.user, ts890.password))
-            if resp == '##ID1;':
-                print('Connected OK')
-                # Turn on auto information AI2;
-                await self._send_cmd('AI2;')
-                # Poll for required info
-                await self._send_cmd('BS3;')
-                await self._send_cmd('BS4;')
-                await self._send_cmd('BSM0;')
-                # Run the CAT response handler and heartbeat coroutines
-                await asyncio.gather(
-                        self._do_cat_rx(),
-                        self._do_heartbeat()
-                )
-            else:
-                print('TS-890 login fasilure')
-        else:
-            print('TS-890 connection refused')
-
-    # BS3; reads bandscope mode (centre/fixed/auto)
-
-    #  FA; or FB; read receiver freq (for centre mode)
-    #  BS4; reads bandscope span (for centre mode)
-    # or:
-    #  BSM; reads bandscope upper/lower freqs for fixed mode and auto scroll
-
-
-
-    # Enable bandscope LAN output DD0
-
-    # Receive one line of data (640 points) ##DD2
-
+            try:
+                # Start connection to TS-890 by sending ##CN;
+                resp = await self._send_cmd_wait_response('##CN;')
+                # Response ##CNx; (x=1 ok, x=0 connection refused)
+                if resp == '##CN1;':
+                    # Send ##ID & read response ##IDx; (x=1 ok, x=0 connection refused)
+                    resp = await self._send_cmd_wait_response(cat_id(self._ts890.user, self._ts890.password))
+                    if resp == '##ID1;':
+                        print('Connected OK')
+                        # Turn on auto information AI2;
+                        await self._send_cmd('AI2;')
+                        # Poll for required info
+                        await self._send_cmd('BS3;')
+                        await self._send_cmd('BS4;')
+                        await self._send_cmd('BSM0;')
+                        await self._send_cmd('FR;')
+                        # Run the CAT response handler and heartbeat coroutines
+                        await asyncio.gather(
+                                self._do_cat_rx(),
+                                self._do_heartbeat()
+                        )
+                    else:
+                        print('TS-890 login failure')
+                else:
+                    print('TS-890 connection refused')
+            finally:
+                self._writer.close()
+                await self._writer.wait_closed()
+        except asyncio.TimeoutError:
+            raise AppException('timeout connecting to',
+                               context='TS-890 connection',
+                               additional=self._ts890.host)
+        except OSError as exp:
+            raise AppException(exp, 'connecting to TS-890')
 
 #--------------------------------------------------------------
 # Main
@@ -372,16 +468,18 @@ async def main(ts890, n1mm):
     ''' Main entry point: run client '''
     spectrum_queue = Queue()
 
-    ts890_connection = Ts890Connection(spectrum_queue, ts890)
+    try:
+        ts890_connection = Ts890Connection(spectrum_queue, ts890)
+        task1 = asyncio.create_task(
+            ts890_connection.fetch_from_ts890())
 
-    task1 = asyncio.create_task(
-        ts890_connection.fetch_from_ts890())
+        task2 = asyncio.create_task(
+            send_to_n1mm(spectrum_queue, n1mm))
 
-    task2 = asyncio.create_task(
-        send_to_n1mm(spectrum_queue, n1mm))
-
-    await task1
-    await task2
+        await task1
+        await task2
+    except asyncio.TimeoutError:
+        pass
 
 if __name__ == '__main__':
     PARSER = argparse.ArgumentParser()
@@ -413,7 +511,9 @@ if __name__ == '__main__':
     ARGS = PARSER.parse_args()
 
     try:
-        ts890 = Ts890(ARGS.ts890, ARGS.user, ARGS.password)
-        asyncio.run(main(ts890, ARGS.n1mm))
+        ts890_ctx = Ts890(ARGS.ts890, ARGS.user, ARGS.password)
+        asyncio.run(main(ts890_ctx, ARGS.n1mm))
     except KeyboardInterrupt:
         print('Caught keyboard interrupt')
+    except AppException as ex:
+        print(f"Error: {ex.context}: {ex} {ex.additional}")
