@@ -115,12 +115,25 @@ async def handle_ai_cat(reader):
         except asyncio.IncompleteReadError as err:
             pass
 
+async def send_cmd(writer, cmd):
+    ''' Wrapper for write and drain '''
+    writer.write(cmd.encode())
+    await writer.drain()
+
+async def send_cmd_wait_response(reader, writer, cmd):
+    ''' Wrapper for write and wait for response '''
+    writer.write(cmd.encode())
+    await writer.drain()
+    resp = await reader.readuntil(separator=b';')
+    if resp:
+        resp = resp.decode()
+    return resp
+
 async def do_heartbeat(writer):
     ''' Coroutine to send regular heartbeat CAT cmds to TS-890 '''
     while True:
         # Might as well poll something useful - get bandscope mode
-        writer.write('BS3;'.encode())
-        await writer.drain()
+        await send_cmd(writer, 'BS3;')
         # Wait 5 seconds
         await asyncio.sleep(5)
 
@@ -133,32 +146,20 @@ async def fetch_from_ts890(queue: Queue, ts890: Ts890):
 
     # Start connection to TS-890 by sending ##CN;
     print('Sending CN')
-    writer.write('##CN;'.encode())
-    await writer.drain()
-    # Read response ##CNx; (x=1 ok, x=0 connection refused)
-    resp = await reader.readuntil(separator=b';')
-
-    if resp.decode() == '##CN1;':
-        # Send ##ID
+    resp = await send_cmd_wait_response(reader, writer, '##CN;')
+    # Response ##CNx; (x=1 ok, x=0 connection refused)
+    if resp == '##CN1;':
+        # Send ##ID & read response ##IDx; (x=1 ok, x=0 connection refused)
         print('Sending ID')
-        writer.write(cat_id(ts890.user, ts890.password).encode())
-        await writer.drain()
-        # Read response ##IDx; (x=1 ok, x=0 connection refused)
-        print('waiting resp')
-        resp = await reader.readuntil(separator=b';')
-
-        if resp.decode() == '##ID1;':
+        resp = await send_cmd_wait_response(reader, writer, cat_id(ts890.user, ts890.password))
+        if resp == '##ID1;':
             # Turn on auto information AI2;
             print('Sending AI')
-            writer.write('AI2;'.encode())
-            await writer.drain()
+            await send_cmd(writer, 'AI2;')
             # Poll for required info
-            writer.write('BS3;'.encode())
-            await writer.drain()
-            writer.write('BS4;'.encode())
-            await writer.drain()
-            writer.write('BSM;'.encode())
-            await writer.drain()
+            await send_cmd(writer, 'BS3;')
+            await send_cmd(writer, 'BS4;')
+            await send_cmd(writer, 'BSM;')
             # Run the AI response handler and heartbeat coroutines
             await asyncio.gather(
                     handle_ai_cat(reader),
