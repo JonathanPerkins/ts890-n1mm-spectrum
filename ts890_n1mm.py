@@ -140,25 +140,55 @@ class SpectrumData:
 # Interface to N1MM+
 #--------------------------------------------------------------
 
+class N1mmSpectrumProtocol:
+    def connection_made(self, transport):
+        self.transport = transport
+        print('connection made')
+
+    def connection_lost(self, exc):
+        # The socket has been closed
+        print(f'connection lost: {exc}')
+
+    def datagram_received(self, data, addr):
+        message = data.decode()
+        # Not expecting anything back from N1MM, but
+        # log it if we do
+        print('Received %r from %s' % (message, addr))
+
 async def send_to_n1mm(queue: Queue, n1mm_host):
     ''' Coroutine to read spectrum data from the queue
         and send to N1MM.
     '''
-    while True:
-        sd: SpectrumData = await queue.get()
-        # Build the XML structure
-        try:
-            spectrum = ET.Element('spectrum')
-            ET.SubElement(spectrum, 'app').text='ts890-n1mm'
-            ET.SubElement(spectrum, 'name').text='TS-890'
-            ET.SubElement(spectrum, 'LowScopeFrequency').text=str(sd.lower_hz/1000)
-            ET.SubElement(spectrum, 'HighScopeFrequency').text=str(sd.upper_hz/1000)
-            ET.SubElement(spectrum, 'ScalingFactor').text='1'
-            ET.SubElement(spectrum, 'DataCount').text=str(sd.num_data_points)
-            print(ET.dump(spectrum))
-        except TypeError:
-            pass
-        queue.task_done()
+
+    loop = asyncio.get_running_loop()
+
+    transport, protocol = await loop.create_datagram_endpoint(
+        lambda: N1mmSpectrumProtocol(),
+        remote_addr=('172.21.141.126', 13064))
+
+    try:
+        while True:
+            sd: SpectrumData = await queue.get()
+            # Build the XML structure
+            try:
+                spectrum = ET.Element('Spectrum')
+                ET.SubElement(spectrum, 'Name').text='TS-890'
+                ET.SubElement(spectrum, 'LowScopeFrequency').text=str(int(sd.lower_hz/1000))
+                ET.SubElement(spectrum, 'HighScopeFrequency').text=str(int(sd.upper_hz/1000))
+                ET.SubElement(spectrum, 'ScalingFactor').text='0.5'
+                ET.SubElement(spectrum, 'DataCount').text=str(sd.num_data_points)
+                ET.SubElement(spectrum, 'SpectrumData').text=','.join(map(str,sd.data))
+                xml_str = ET.tostring(spectrum,
+                                      encoding='utf8',
+                                      xml_declaration=r'<\?xml version="1.0" encoding="utf-8"\?>')
+                # print(f'{xml_str[:300].decode()}')
+                await transport.sendto(xml_str)
+                print('sent')
+            except TypeError:
+                pass
+            queue.task_done()
+    finally:
+        transport.close()
 
 #--------------------------------------------------------------
 # Interface to TS-890
@@ -205,8 +235,21 @@ class Ts890Connection:
         ''' Handle a ##DDx cat response '''
         # Just interested in ##DD2 of fixed length
         if len(resp) == 1286 and resp[:5] == '##DD2':
-            sd = SpectrumData(self._ts890, 'temp')
-            await self._queue.put(sd)
+            try:
+                # Extract hex data, convert to integer and invert
+                data = []
+                for i in range(5,len(resp)-1,2):
+                    val = int(resp[i:i+2],16)
+                    # Convert value to N1MM scale
+                    if val < 140:
+                        val = 140 - val
+                    else:
+                        val = 0
+                    data.append(val)
+                sd = SpectrumData(self._ts890, data)
+                await self._queue.put(sd)
+            except ValueError:
+                print('Failed to parse bandscope data')
         else:
             print(f'Ignoring unexpected ##DD: {resp}')
 
@@ -255,7 +298,7 @@ class Ts890Connection:
                 # bandscope data cab be enabled/disabled
                 if self._ts890.has_all_required_info():
                     # Enable bandscope data
-                    await self._send_cmd('DD02;')
+                    await self._send_cmd('DD03;')
                 else:
                     # Disable bandscope data
                     await self._send_cmd('DD00;')
