@@ -14,6 +14,9 @@ import xml.etree.ElementTree as ET
 # TS-890 KNS TCP/IP control port
 KNS_CTRL_PORT = 60000
 
+# N1MM+ UDP port for spectrum data
+N1MM_SPECTRUM_PORT = 13064
+
 #--------------------------------------------------------------
 # TS-890 CAT command helpers
 #--------------------------------------------------------------
@@ -60,11 +63,14 @@ class Ts890:
     @bs_mode.setter
     def bs_mode(self, mode):
         ''' Sets the bandscope mode '''
-        self._bs_mode = mode
-        # TODO centre mode not yet supported, invalidate freqs
-        if self._bs_mode == 0:
-            self._bs_lower_hz = None
-            self._bs_upper_hz = None
+        if mode >=0 and mode < 4 and mode != self._bs_mode:
+            modes = ['centre', 'fixed', 'auto scroll']
+            self._bs_mode = mode
+            print(f'Bandscope {modes[mode]} mode')
+            # TODO centre mode not yet supported, invalidate freqs
+            if self._bs_mode == 0:
+                self._bs_lower_hz = None
+                self._bs_upper_hz = None
 
     @property
     def bs_lower_hz(self):
@@ -164,7 +170,7 @@ async def send_to_n1mm(queue: Queue, n1mm_host):
 
     transport, protocol = await loop.create_datagram_endpoint(
         lambda: N1mmSpectrumProtocol(),
-        remote_addr=('172.21.141.126', 13064))
+        remote_addr=(n1mm_host, N1MM_SPECTRUM_PORT))
 
     try:
         while True:
