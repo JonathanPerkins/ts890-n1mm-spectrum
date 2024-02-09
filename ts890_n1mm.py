@@ -65,8 +65,10 @@ class Ts890:
         self._password = password
         self._bs_mode = None
         self._bs_span_hz = None
+        self._bs_expanded_span_offset_hz = 0
         self._bs_lower_hz = None
         self._bs_upper_hz = None
+        self._bs_expanded = None
         self._receiver_vfo = None
 
     @property
@@ -107,7 +109,13 @@ class Ts890:
 
     @property
     def bs_lower_hz(self):
-        ''' Returns the bandscope lower edge frequency in Hz '''
+        ''' Returns the on-screen bandscope lower edge frequency in Hz '''
+        return self._bs_lower_hz
+    @property
+    def bs_expanded_lower_hz(self):
+        ''' Returns the (expanded) bandscope lower edge frequency in Hz '''
+        if self._bs_expanded:
+            return self._bs_lower_hz - self._bs_expanded_span_offset_hz
         return self._bs_lower_hz
     @bs_lower_hz.setter
     def bs_lower_hz(self, lower_hz):
@@ -116,7 +124,13 @@ class Ts890:
 
     @property
     def bs_upper_hz(self):
-        ''' Returns the bandscope upper edge frequency in Hz '''
+        ''' Returns the on-screen bandscope upper edge frequency in Hz '''
+        return self._bs_upper_hz
+    @property
+    def bs_expanded_upper_hz(self):
+        ''' Returns the (expanded) bandscope lower edge frequency in Hz '''
+        if self._bs_expanded:
+            return self._bs_upper_hz + self._bs_expanded_span_offset_hz
         return self._bs_upper_hz
     @bs_upper_hz.setter
     def bs_upper_hz(self, upper_hz):
@@ -131,9 +145,24 @@ class Ts890:
     def bs_span_hz(self, span):
         ''' Sets the bandscope span '''
         spans = [5000, 10000, 20000, 30000, 50000, 100000, 200000, 500000]
+        # Expanded spans reported in BS data
+        expanded = [15000, 30000, 60000, 90000, 150000, 300000, 400000, 500000]
         if 0 <= span < len(spans) and span != self._bs_span_hz:
             self._bs_span_hz = spans[span]
+            # And calculate the extra offset applied to the
+            # upper and lower frequencies when expanded.
+            self._bs_expanded_span_offset_hz = (expanded[span] - spans[span]) / 2
             print(f'Bandscope span {self._bs_span_hz}Hz')
+
+    @property
+    def bs_expanded(self):
+        ''' Returns True if the bandscope span is expanded '''
+        return self._bs_expanded
+    @bs_expanded.setter
+    def bs_expanded(self, expanded):
+        ''' Sets the bandscope expanded mode '''
+        self._bs_expanded = expanded != 0
+        print(f'Bandscope expanded = {self._bs_expanded}')
 
     @property
     def receiver_vfo(self):
@@ -170,8 +199,8 @@ class SpectrumData:
     ''' One line of spectrum data '''
     def __init__(self, ts890: Ts890, data):
         self._data = data
-        self._lower_hz = ts890.bs_lower_hz
-        self._upper_hz = ts890.bs_upper_hz
+        self._lower_hz = ts890.bs_expanded_lower_hz
+        self._upper_hz = ts890.bs_expanded_upper_hz
 
     @property
     def data(self):
@@ -293,6 +322,11 @@ class Ts890Connection:
                     self._ts890.bs_span_hz = int(resp[3])
                 except ValueError:
                     print(f'error extracting span from {resp}')
+            elif cmd == 'BSO':
+                try:
+                    self._ts890.bs_expanded = int(resp[3])
+                except ValueError:
+                    print(f'error extracting expanded state from {resp}')
 
     async def _handle_cat_dd(self, resp):
         ''' Handle a ##DDx cat response '''
@@ -383,7 +417,7 @@ class Ts890Connection:
                 resp = resp.decode()
         except asyncio.IncompleteReadError as err:
             resp = None
-            raise AppException(err, context='reading CAT response')
+            raise AppException(err, context='reading CAT response') from err
         return resp
 
     async def _do_cat_rx(self):
@@ -405,7 +439,7 @@ class Ts890Connection:
                     await self._send_cmd('DD00;')
                     bandscope_on = False
             except asyncio.IncompleteReadError as err:
-                raise AppException(err, context='reading CAT from TS-890')
+                raise AppException(err, context='reading CAT from TS-890') from err
 
     async def _do_heartbeat(self):
         ''' Coroutine to send regular heartbeat CAT cmds to TS-890 '''
@@ -440,6 +474,7 @@ class Ts890Connection:
                         await self._send_cmd('BS3;')
                         await self._send_cmd('BS4;')
                         await self._send_cmd('BSM0;')
+                        await self._send_cmd('BSO;')
                         await self._send_cmd('FR;')
                         # Run the CAT response handler and heartbeat coroutines
                         await asyncio.gather(
@@ -453,12 +488,12 @@ class Ts890Connection:
             finally:
                 self._writer.close()
                 await self._writer.wait_closed()
-        except asyncio.TimeoutError:
+        except asyncio.TimeoutError as exp:
             raise AppException('timeout connecting to',
                                context='TS-890 connection',
-                               additional=self._ts890.host)
+                               additional=self._ts890.host) from exp
         except OSError as exp:
-            raise AppException(exp, 'connecting to TS-890')
+            raise AppException(exp, 'connecting to TS-890') from exp
 
 #--------------------------------------------------------------
 # Main
