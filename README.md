@@ -1,10 +1,8 @@
 # ts890-n1mm-spectrum
 
-This is a Python script to send spectrum data from a network connected Kenwood TS-890S to N1MM+ logger.
-
 ![overview](images/overview_image.png)
 
-It allows the user to see the TS-890's bandscope in a N1MM spectrum display window with spots overlaid:
+This is a Python script to read band scope data from a network connected Kenwood TS-890S and send it formatted as spectrum data to N1MM+ logger. It allows the user to see the TS-890's bandscope in a N1MM spectrum display window with spots overlaid:
 
 ![example N1MM spectrum display](images/example_n1mm_bandscope_1.png)
 
@@ -18,28 +16,42 @@ Installation is simply download the __ts890_n1mm.py__ file to a directory of you
 
 ### Minimal usage example:
 
-```bash
-./ts890_n1mm.py -t 192.168.1.89 -u TS890_AdminUserName -p TS890_AdminPassword -n 192.168.1.11
+```
+./ts890_n1mm.py -t 192.168.1.89 -a AdminUserName -p AdminPassword -n 192.168.1.11
 ```
 
-In the above example, the TS-890 has an IP address of __192.168.1.89__ and has a KVS admin user called __TS890_AdminUserName__ with a password of __TS890_AdminPassword__. The Windows PC running N1MM+ has an IP address of __192.168.1.11__.
+In the above example, the TS-890 has an IP address of _192.168.1.89_ and has an admin user called _AdminUserName_ with a password of _AdminPassword_. The Windows PC running N1MM+ has an IP address of _192.168.1.11_. For more clarity the alternative long form of option names can be used:
+
+```
+./ts890_n1mm.py --ts890 192.168.1.89 --admin AdminUserName --password AdminPassword --n1mm 192.168.1.11
+```
 
 ### Displaying help
 
-Use the __--help__ command line option to list all options:
+Use the _--help_ command line option to list all options:
 
-```bash
+```
 ./ts890_n1mm.py --help
-usage: ts890_n1mm.py [-h] -t <host or addr> -u <username> -p <password> [-n <host or addr>]
+usage: ts890_n1mm.py [-h] -t <host or addr> -p <password> (-a <admin account name> | -u <user account name>) [-n <host or addr>]
+
+Script to read bandscope data from a TS-890S and send it to N1MM+ logger.
 
 optional arguments:
   -h, --help            show this help message and exit
+
+TS-890 options:
   -t <host or addr>, --ts890 <host or addr>
                         TS-890 IP address or hostname
-  -u <username>, --username <username>
-                        TS-890 username
   -p <password>, --password <password>
                         TS-890 password
+
+Specify either an admin or user account for the TS-890:
+  -a <admin account name>, --admin <admin account name>
+                        TS-890 admin name
+  -u <user account name>, --user <user account name>
+                        TS-890 user name
+
+N1MM options:
   -n <host or addr>, --n1mm <host or addr>
                         N1MM IP address or hostname
 ```
@@ -48,17 +60,17 @@ optional arguments:
 
 Command line arguments can be placed in a text file and loaded by:
 
-```bash
-$ ./ts890_n1mm.py @my_config.cfg
+```
+./ts890_n1mm.py @my_config.cfg
 ```
 
 Where __my_cfg.cfg__ for the previous example would be:
 
 ```
 --ts890=192.168.1.89
---username=TS890_AdminUserName
---password=TS890_AdminPassword
+--admin=AdminUserName
+--password=AdminPassword
 --n1mm=192.168.1.11
 ```
 
-Note: each argument must be on a new line and use the __--option=value__ format with an equals sign and no whitespace.
+Note: each argument must be on a new line and use the _--option=value_ format with an equals sign and no whitespace.

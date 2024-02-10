@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 
 '''
-Script to connect to a Kenwood TS-890S, read the spectrum data and
-forward to an instance of N1MM+ logger.
+Script to connect to a Kenwood TS-890S, read the band scope data
+and forward to an instance of N1MM+ logger.
 
 (c) 2024 Jonathan Perkins G4IVV
 '''
@@ -10,6 +10,7 @@ forward to an instance of N1MM+ logger.
 import asyncio
 from asyncio import Queue
 import argparse
+import textwrap
 import xml.etree.ElementTree as ET
 
 
@@ -50,13 +51,12 @@ class AppException(Exception):
         ''' Getter for additional info '''
         return self._additional
 
-#--------------------------------------------------------------
-# TS-890 CAT command helpers
-#--------------------------------------------------------------
-
-def cat_id(username, password):
-    ''' Format an adminstrator ID login command '''
-    return f'##ID0{len(username):02}{len(password):02}{username}{password};'
+class Ts890ConnectionException(AppException):
+    ''' Exception for TS-890 connection errors '''
+    def __init__(self, value, additional=''):
+        self._context = 'TS-890 connection'
+        self._additional = additional
+        super(AppException, self).__init__(value)
 
 #--------------------------------------------------------------
 # TS-890 class
@@ -64,9 +64,10 @@ def cat_id(username, password):
 
 class Ts890:
     ''' TS-890 configuration and status '''
-    def __init__(self, host, user, password):
+    def __init__(self, host, account, is_admin, password):
         self._host = host
-        self._user = user
+        self._account = account
+        self._is_admin = is_admin
         self._password = password
         self._bs_mode = None
         self._bs_span_hz = None
@@ -82,9 +83,14 @@ class Ts890:
         return self._host
 
     @property
-    def user(self):
-        ''' Returns the username to login to the TS-890 '''
-        return self._user
+    def account(self):
+        ''' Returns the account name to login to the TS-890 '''
+        return self._account
+
+    @property
+    def is_admin(self):
+        ''' Returns True if the TS-890 credentials are for teh admin account '''
+        return self._is_admin
 
     @property
     def password(self):
@@ -245,7 +251,8 @@ class N1mmSpectrumProtocol:
     def connection_lost(self, exc):
         ''' Mandatory connection_lost method '''
         # The socket has been closed
-        print(f'N1MM transport closed: {exc}')
+        if exc:
+            print(f'N1MM transport closed: {exc}')
 
     def datagram_received(self, data, addr):
         ''' UDP datagram received callback '''
@@ -287,6 +294,20 @@ async def send_to_n1mm(queue: Queue, n1mm_host):
             queue.task_done()
     finally:
         transport.close()
+
+#--------------------------------------------------------------
+# TS-890 CAT command helpers
+#--------------------------------------------------------------
+
+def cat_id(ts890: Ts890):
+    ''' Format an adminstrator/user ID login command '''
+    if ts890.is_admin:
+        acct_type = 0
+    else:
+        acct_type =1
+    return (f'##ID{acct_type}'
+            f'{len(ts890.account):02}{len(ts890.password):02}'
+            f'{ts890.account}{ts890.password};')
 
 #--------------------------------------------------------------
 # Interface to TS-890
@@ -474,7 +495,7 @@ class Ts890Connection:
             and save it in the queue
         '''
         try:
-            print(f"Connecting to TS-890 {self._ts890.host}")
+            print(f"Connecting to TS-890 [{self._ts890.host}]")
             self._reader, self._writer = await asyncio.wait_for(
                 asyncio.open_connection(self._ts890.host, KNS_CTRL_PORT),
                 10)
@@ -485,7 +506,7 @@ class Ts890Connection:
                 # Response ##CNx; (x=1 ok, x=0 connection refused)
                 if resp == '##CN1;':
                     # Send ##ID & read response ##IDx; (x=1 ok, x=0 connection refused)
-                    resp = await self._send_cmd_wait_response(cat_id(self._ts890.user, self._ts890.password))
+                    resp = await self._send_cmd_wait_response(cat_id(self._ts890))
                     if resp == '##ID1;':
                         print('Connected OK')
                         # Turn on auto information AI2;
@@ -502,16 +523,16 @@ class Ts890Connection:
                                 self._do_heartbeat()
                         )
                     else:
-                        print('TS-890 login failure')
+                        raise Ts890ConnectionException('login failure',
+                                additional='[check account information is correct]')
                 else:
-                    print('TS-890 connection refused')
+                    raise Ts890ConnectionException('connection refused')
             finally:
                 self._writer.close()
                 await self._writer.wait_closed()
         except asyncio.TimeoutError as exp:
-            raise AppException('timeout connecting to',
-                               context='TS-890 connection',
-                               additional=self._ts890.host) from exp
+            raise Ts890ConnectionException('timeout connecting to',
+                    additional=self._ts890.host) from exp
         except OSError as exp:
             raise AppException(exp, 'connecting to TS-890') from exp
 
@@ -537,27 +558,46 @@ async def main(ts890, n1mm):
         pass
 
 if __name__ == '__main__':
-    PARSER = argparse.ArgumentParser(fromfile_prefix_chars='@')
+    PARSER = argparse.ArgumentParser(
+        fromfile_prefix_chars='@',
+        description=textwrap.dedent(
+            r'''
+            Script to read bandscope data from a TS-890S and send it to N1MM+ logger.
+            ''')
+    )
 
-    PARSER.add_argument('-t', '--ts890',
-                        required=True,
-                        dest = 'ts890',
-                        metavar = '<host or addr>',
-                        help = 'TS-890 IP address or hostname')
+    TS890_GROUP = PARSER.add_argument_group('TS-890 options')
 
-    PARSER.add_argument('-u', '--username',
-                        required=True,
-                        dest = 'user',
-                        metavar = '<username>',
-                        help = 'TS-890 username')
+    TS890_GROUP.add_argument('-t', '--ts890',
+                             required=True,
+                             dest = 'ts890',
+                             metavar = '<host or addr>',
+                             help = 'TS-890 IP address or hostname')
 
-    PARSER.add_argument('-p', '--password',
-                        required=True,
-                        dest = 'password',
-                        metavar = '<password>',
-                        help = 'TS-890 password')
+    TS890_GROUP.add_argument('-p', '--password',
+                             required=True,
+                             dest = 'password',
+                             metavar = '<password>',
+                             help = 'TS-890 password')
 
-    PARSER.add_argument('-n', '--n1mm',
+    # Mutually exclusive account group for TS-890
+    ACCOUNT_GROUP = PARSER.add_argument_group(
+        'Specify either an admin or user account for the TS-890')
+    ACCOUNTS = ACCOUNT_GROUP.add_mutually_exclusive_group(required=True)
+
+    ACCOUNTS.add_argument('-a', '--admin',
+                          dest = 'admin',
+                          metavar = '<admin account name>',
+                          help = 'TS-890 admin name')
+
+    ACCOUNTS.add_argument('-u', '--user',
+                          dest = 'user',
+                          metavar = '<user account name>',
+                          help = 'TS-890 user name')
+
+    N1MM_GROUP = PARSER.add_argument_group('N1MM options')
+
+    N1MM_GROUP.add_argument('-n', '--n1mm',
                         dest = 'n1mm',
                         metavar = '<host or addr>',
                         help = 'N1MM IP address or hostname',
@@ -566,9 +606,13 @@ if __name__ == '__main__':
     ARGS = PARSER.parse_args()
 
     try:
-        ts890_ctx = Ts890(ARGS.ts890, ARGS.user, ARGS.password)
+        # Admin or user account?
+        if ARGS.admin:
+            ts890_ctx = Ts890(ARGS.ts890, ARGS.admin, True, ARGS.password)
+        else:
+            ts890_ctx = Ts890(ARGS.ts890, ARGS.user, False, ARGS.password)
         asyncio.run(main(ts890_ctx, ARGS.n1mm))
     except KeyboardInterrupt:
-        print('Caught keyboard interrupt')
+        print('\nCaught keyboard interrupt, exiting.\n')
     except AppException as ex:
-        print(f"Error: {ex.context}: {ex} {ex.additional}")
+        print(f"\nError: {ex.context}: {ex} {ex.additional}\n")
