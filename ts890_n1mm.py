@@ -578,7 +578,7 @@ if __name__ == '__main__':
                              required=True,
                              dest = 'password',
                              metavar = '<password>',
-                             help = 'TS-890 password')
+                             help = 'TS-890 account password')
 
     # Mutually exclusive account group for TS-890
     ACCOUNT_GROUP = PARSER.add_argument_group(
@@ -587,13 +587,13 @@ if __name__ == '__main__':
 
     ACCOUNTS.add_argument('-a', '--admin',
                           dest = 'admin',
-                          metavar = '<admin account name>',
-                          help = 'TS-890 admin name')
+                          metavar = '<admin account>',
+                          help = 'TS-890 admin account name')
 
     ACCOUNTS.add_argument('-u', '--user',
                           dest = 'user',
-                          metavar = '<user account name>',
-                          help = 'TS-890 user name')
+                          metavar = '<user account>',
+                          help = 'TS-890 user account name')
 
     N1MM_GROUP = PARSER.add_argument_group('N1MM options')
 

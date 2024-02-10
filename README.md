@@ -32,7 +32,7 @@ Use the _--help_ command line option to list all options:
 
 ```
 ./ts890_n1mm.py --help
-usage: ts890_n1mm.py [-h] -t <host or addr> -p <password> (-a <admin account name> | -u <user account name>) [-n <host or addr>]
+usage: ts890_n1mm.py [-h] -t <host or addr> -p <password> (-a <admin account> | -u <user account>) [-n <host or addr>]
 
 Script to read bandscope data from a TS-890S and send it to N1MM+ logger.
 
@@ -43,13 +43,13 @@ TS-890 options:
   -t <host or addr>, --ts890 <host or addr>
                         TS-890 IP address or hostname
   -p <password>, --password <password>
-                        TS-890 password
+                        TS-890 account password
 
 Specify either an admin or user account for the TS-890:
-  -a <admin account name>, --admin <admin account name>
-                        TS-890 admin name
-  -u <user account name>, --user <user account name>
-                        TS-890 user name
+  -a <admin account>, --admin <admin account>
+                        TS-890 admin account name
+  -u <user account>, --user <user account>
+                        TS-890 user account name
 
 N1MM options:
   -n <host or addr>, --n1mm <host or addr>
@@ -58,13 +58,13 @@ N1MM options:
 
 ### Loading arguments from a file
 
-Command line arguments can be placed in a text file and loaded by:
+Command line arguments can be placed in a text file and loaded using the '@' argument, e.g:
 
 ```
 ./ts890_n1mm.py @my_config.cfg
 ```
 
-Where __my_cfg.cfg__ for the previous example would be:
+Where _my_cfg.cfg_ for the previous example would contain:
 
 ```
 --ts890=192.168.1.89
