@@ -74,3 +74,9 @@ Where _my_cfg.cfg_ for the previous example would contain:
 ```
 
 Note: each argument must be on a new line and use the _--option=value_ format with an equals sign and no whitespace.
+
+# License
+
+This software is offered with no warranty or liability and is licensed under the permissive open source MIT license.
+
+Copyright (c) 2024 Jonathan Perkins G4IVV.
