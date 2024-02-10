@@ -3,6 +3,8 @@
 '''
 Script to connect to a Kenwood TS-890S, read the spectrum data and
 forward to an instance of N1MM+ logger.
+
+(c) 2024 Jonathan Perkins G4IVV
 '''
 
 import asyncio
@@ -16,6 +18,9 @@ KNS_CTRL_PORT = 60000
 
 # N1MM+ UDP port for spectrum data
 N1MM_SPECTRUM_PORT = 13064
+
+# Maximum depth of the inter-task queue
+MAX_QUEUE_DEPTH = 2
 
 #--------------------------------------------------------------
 # Helper classes
@@ -249,6 +254,10 @@ class N1mmSpectrumProtocol:
         # log it if we do
         print(f'Received {message} from {addr}')
 
+    def error_received(self, exc):
+        ''' Socket error callback '''
+        print(f'N1MM transport socket error: {exc}')
+
 async def send_to_n1mm(queue: Queue, n1mm_host):
     ''' Coroutine to read spectrum data from the queue
         and send to N1MM.
@@ -344,7 +353,18 @@ class Ts890Connection:
                         val = 0
                     data.append(val)
                 sdata = SpectrumData(self._ts890, data)
-                await self._queue.put(sdata)
+                # If the queue is full, discard the oldest
+                # entry before appending the new entry
+                if self._queue.full():
+                    try:
+                        print("Purging stale queue entry")
+                        self._queue.get_nowait()
+                    except asyncio.QueueEmpty:
+                        print("Full queue appears empty")
+                try:
+                    self._queue.put_nowait(sdata)
+                except asyncio.QueueFull:
+                    print("Queue unexpectently full")
             except ValueError:
                 print('Failed to parse bandscope data')
         else:
@@ -501,7 +521,7 @@ class Ts890Connection:
 
 async def main(ts890, n1mm):
     ''' Main entry point: run client '''
-    spectrum_queue = Queue()
+    spectrum_queue = Queue(maxsize=MAX_QUEUE_DEPTH)
 
     try:
         ts890_connection = Ts890Connection(spectrum_queue, ts890)
