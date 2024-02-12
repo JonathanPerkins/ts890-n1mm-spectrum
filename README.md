@@ -8,9 +8,9 @@ This is a Python script to read band scope data from a network connected Kenwood
 
 ## Requirements
 
-This is a self contained Python 3 script that should run without the need to install any extra Python modules. It has been tested on MacOS Sonoma with the default Python version 3.8.2, but should run on Linux or Windows if a suitable Python 3 is installed.
+This is a self contained Python 3 script that should run without the need to install any extra Python modules. It has been tested on both Intel and ARM versions of MacOS Sonoma with the default Python 3.8/3.9 versions, and should run on Linux or Windows if a similar or newer Python 3 is installed.
 
-Installation is simply download the __ts890_n1mm.py__ file to a directory of your choice.
+Installation is to simply download the __ts890_n1mm.py__ file to a directory of your choice.
 
 ## Comand line options
 
@@ -20,7 +20,13 @@ Installation is simply download the __ts890_n1mm.py__ file to a directory of you
 ./ts890_n1mm.py -t 192.168.1.89 -a AdminUserName -p AdminPassword -n 192.168.1.11
 ```
 
-In the above example, the TS-890 has an IP address of _192.168.1.89_ and has an admin user called _AdminUserName_ with a password of _AdminPassword_. The Windows PC running N1MM+ has an IP address of _192.168.1.11_. For more clarity the alternative long form of option names can be used:
+In the above example, the TS-890 has an IP address of _192.168.1.89_ and has an admin user called _AdminUserName_ with a password of _AdminPassword_. The Windows PC running N1MM+ has an IP address of _192.168.1.11_.
+
+### Options format
+
+This script accepts either shortform (e.g. _-t_) or longform (e.g. _--ts890_) command line options. There's no functional difference, it's just a personal preference.
+
+The alternative longform option version of the previous example would be:
 
 ```
 ./ts890_n1mm.py --ts890 192.168.1.89 --admin AdminUserName --password AdminPassword --n1mm 192.168.1.11
@@ -58,13 +64,13 @@ N1MM options:
 
 ### Loading arguments from a file
 
-Command line arguments can be placed in a text file and loaded using the '@' argument, e.g:
+Command line options can be placed in a text file and loaded using the '@' argument, e.g:
 
 ```
 ./ts890_n1mm.py @my_config.cfg
 ```
 
-Where _my_cfg.cfg_ for the previous example would contain:
+Where _my_config.cfg_ for the previous example would be:
 
 ```
 --ts890=192.168.1.89
@@ -73,10 +79,10 @@ Where _my_cfg.cfg_ for the previous example would contain:
 --n1mm=192.168.1.11
 ```
 
-Note: each argument must be on a new line and use the _--option=value_ format with an equals sign and no whitespace.
+Note: the Python ArgParse module is a little fussy and so each option must be on a new line and use the _--option=value_ format with an equals sign and no whitespace.
 
 # License
 
-This software is offered with no warranty or liability and is licensed under the permissive open source MIT license.
+This software is offered free of charge with no warranty or liability and is licensed under the permissive open source MIT license.
 
 Copyright (c) 2024 Jonathan Perkins G4IVV.
