@@ -240,7 +240,7 @@ class SpectrumData:
 #--------------------------------------------------------------
 
 class N1mmSpectrumProtocol:
-    ''' Protocol implementation for UDP connection to N1MM '''
+    ''' DatagramProtocol implementation for UDP connection to N1MM '''
     def __init__(self):
         self.transport = None
 
@@ -270,8 +270,8 @@ async def send_to_n1mm(queue: Queue, n1mm_host):
         and send to N1MM.
     '''
     loop = asyncio.get_running_loop()
-    transport, protocol = await loop.create_datagram_endpoint(
-        lambda: N1mmSpectrumProtocol(),
+    transport, _ = await loop.create_datagram_endpoint(
+        N1mmSpectrumProtocol,
         remote_addr=(n1mm_host, N1MM_SPECTRUM_PORT))
     try:
         while True:
