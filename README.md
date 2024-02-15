@@ -81,6 +81,21 @@ Where _my_config.cfg_ for the previous example would be:
 
 Note: the Python ArgParse module is a little fussy and so each option must be on a new line and use the _--option=value_ format with an equals sign and no whitespace.
 
+# N1MM Configuration
+
+This script uses a seperate (LAN) connection to the TS-890 to retrieve the spectrum data, so you can keep your existing N1MM rig control unmodified using RS232 or USB. The only configuration required in N1MM is for the Spectrum Display window itself. Click the little arrow on the righthand side of the Spectrum Display to bring up its configuration window:
+
+![N1MM spectrum display configuration screen](images/n1mm_spectrum_display_config.png)
+
+The important setting is the _Spectrum Source_ which must be set to _External (WB, Flex, etc)_ in order to enable the XML interface.
+
+The XML data source name is _TS-890_ and I would recommend _Display Bins_ to be set to _1024_, the TS-890 spectrum is 640 points across and N1MM will handle the difference itself.
+
+The complete connection picture including the existing rig control is therefore:
+
+![Complete connection picture](images/ts890_rig_control_and_spectrum.png)
+
+
 # License
 
 This software is offered free of charge with no warranty or liability and is licensed under the permissive open source MIT license.
