@@ -83,7 +83,7 @@ Note: the Python ArgParse module is a little fussy and so each option must be on
 
 # N1MM Configuration
 
-This script uses a seperate (LAN) connection to the TS-890 to retrieve the spectrum data, so you can keep your existing N1MM rig control unmodified using RS232 or USB. The only configuration required in N1MM is for the Spectrum Display window itself. Click the little arrow on the righthand side of the Spectrum Display to bring up its configuration window:
+This script uses a separate (LAN) connection to the TS-890 to retrieve the spectrum data, so you can keep your existing N1MM rig control unmodified using RS232 or USB. The only configuration required in N1MM is for the Spectrum Display window itself. Click the little arrow on the righthand side of the Spectrum Display to bring up its configuration window:
 
 ![N1MM spectrum display configuration screen](images/n1mm_spectrum_display_config.png)
 
