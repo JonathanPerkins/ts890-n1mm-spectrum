@@ -76,6 +76,8 @@ class Ts890:
         self._bs_upper_hz = None
         self._bs_expanded = None
         self._receiver_vfo = None
+        self._operating_mode = None
+        self._freq_offset = 0
 
     @property
     def host(self):
@@ -89,7 +91,7 @@ class Ts890:
 
     @property
     def is_admin(self):
-        ''' Returns True if the TS-890 credentials are for teh admin account '''
+        ''' Returns True if the TS-890 credentials are for the admin account '''
         return self._is_admin
 
     @property
@@ -195,6 +197,33 @@ class Ts890:
         ''' True if VFO B is active '''
         return self._receiver_vfo == 1
 
+    @property
+    def operating_mode(self):
+        ''' Returns the operating mode '''
+        return self._operating_mode
+    @operating_mode.setter
+    def operating_mode(self, mode):
+        ''' Sets the operating mode '''
+        modes = ['Unused', 'LSB', 'USB', 'CW', 'FM', 'AM', 'FSK', 'CW-R',
+                 'Unused', 'FSK-R', 'PSK', 'PSK-R', 'LSB-D', 'USB-D',
+                 'FM-D', 'AM-D']
+        if 0 <= mode < len(modes) and mode != self._operating_mode:
+            self._operating_mode = mode
+            print(f'Mode {modes[mode]}')
+
+    @property
+    def frequency_offset(self):
+        ''' Returns the frequency offset to be applied to the
+            bandscope data, in Hz
+        '''
+        return self._freq_offset
+    @frequency_offset.setter
+    def frequency_offset(self, hz_offset):
+        ''' Sets the frequency offset to be applied to the
+            bandscope data, in Hz
+        '''
+        self._freq_offset = hz_offset
+
     def has_all_required_info(self):
         ''' Returns True if all the required information
             to send spectrum information to N1MM is present,
@@ -210,8 +239,8 @@ class SpectrumData:
     ''' One line of spectrum data '''
     def __init__(self, ts890: Ts890, data):
         self._data = data
-        self._lower_hz = ts890.bs_expanded_lower_hz
-        self._upper_hz = ts890.bs_expanded_upper_hz
+        self._lower_hz = ts890.bs_expanded_lower_hz + ts890.frequency_offset
+        self._upper_hz = ts890.bs_expanded_upper_hz + ts890.frequency_offset
 
     @property
     def data(self):
@@ -419,6 +448,17 @@ class Ts890Connection:
             except ValueError:
                 print(f'error extracting frequency from {resp}')
 
+    async def _handle_cat_om(self, resp):
+        ''' Handle an operating mode OMx; cat response '''
+        if len(resp) == 5:
+            # Only interested in the left side (active RX) frequency display
+            if resp[2] == '0':
+                try:
+                    # Mode is hex character
+                    self._ts890.operating_mode = int(resp[3], 16)
+                except ValueError:
+                    print(f'error extracting mode from {resp}')
+
     async def _handle_info(self, cat_msg):
         ''' Handle received messages from the TS-890 '''
         # CAT response handlers
@@ -427,7 +467,8 @@ class Ts890Connection:
             'FR': self._handle_cat_fr,
             'FA': self._handle_cat_fa_fb,
             'FB': self._handle_cat_fa_fb,
-            '##DD': self._handle_cat_dd
+            '##DD': self._handle_cat_dd,
+            'OM': self._handle_cat_om
         }
         # Non-error messages are at least 3 characters in length
         # "XX...;" or "##XX...;" for LAN commands
@@ -517,6 +558,7 @@ class Ts890Connection:
                         await self._send_cmd('BSM0;')
                         await self._send_cmd('BSO;')
                         await self._send_cmd('FR;')
+                        await self._send_cmd('OM0;')
                         # Run the CAT response handler and heartbeat coroutines
                         await asyncio.gather(
                                 self._do_cat_rx(),
@@ -603,6 +645,16 @@ if __name__ == '__main__':
                         help = 'N1MM IP address or hostname',
                         default = '127.0.0.1')
 
+    # Experimental options group
+    TS890_GROUP = PARSER.add_argument_group('Experimental options')
+
+    TS890_GROUP.add_argument('-f', '--freq-offset',
+                             type=int,
+                             dest = 'freq_offset',
+                             metavar = '<frequency offset in Hz>',
+                             default = 0,
+                             help = 'Shift the displayed bandscope data by +/- specified Hz')
+
     ARGS = PARSER.parse_args()
 
     try:
@@ -611,6 +663,8 @@ if __name__ == '__main__':
             ts890_ctx = Ts890(ARGS.ts890, ARGS.admin, True, ARGS.password)
         else:
             ts890_ctx = Ts890(ARGS.ts890, ARGS.user, False, ARGS.password)
+        # Set extra parameters and run
+        ts890_ctx.frequency_offset = ARGS.freq_offset
         asyncio.run(main(ts890_ctx, ARGS.n1mm))
     except KeyboardInterrupt:
         print('\nCaught keyboard interrupt, exiting.\n')
