@@ -22,6 +22,8 @@ Installation is to simply download the __ts890_n1mm.py__ file to a directory of 
 
 In the above example, the TS-890 has an IP address of _192.168.1.89_ and has an admin user called _AdminUserName_ with a password of _AdminPassword_. The Windows PC running N1MM+ has an IP address of _192.168.1.11_.
 
+Note that on the TS-890, the Admin user name and password are configured in the _Menu->KNS->Config_ screen in the  _[1] Administrator ID_ and _[2] Adminstrator Password_ fields.
+
 ### Options format
 
 This script accepts either shortform (e.g. _-t_) or longform (e.g. _--ts890_) command line options. There's no functional difference, it's just a personal preference.
