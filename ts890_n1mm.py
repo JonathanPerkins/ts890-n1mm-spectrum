@@ -402,19 +402,20 @@ class Ts890Connection:
                     else:
                         val = 0
                     data.append(val)
-                sdata = SpectrumData(self._ts890, data)
-                # If the queue is full, discard the oldest
-                # entry before appending the new entry
-                if self._queue.full():
+                if self._ts890.has_all_required_info():
+                    sdata = SpectrumData(self._ts890, data)
+                    # If the queue is full, discard the oldest
+                    # entry before appending the new entry
+                    if self._queue.full():
+                        try:
+                            print("Purging stale queue entry")
+                            self._queue.get_nowait()
+                        except asyncio.QueueEmpty:
+                            print("Full queue appears empty")
                     try:
-                        print("Purging stale queue entry")
-                        self._queue.get_nowait()
-                    except asyncio.QueueEmpty:
-                        print("Full queue appears empty")
-                try:
-                    self._queue.put_nowait(sdata)
-                except asyncio.QueueFull:
-                    print("Queue unexpectently full")
+                        self._queue.put_nowait(sdata)
+                    except asyncio.QueueFull:
+                        print("Queue unexpectently full")
             except ValueError:
                 print('Failed to parse bandscope data')
         else:
