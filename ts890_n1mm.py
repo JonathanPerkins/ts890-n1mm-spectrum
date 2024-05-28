@@ -12,6 +12,7 @@ from asyncio import Queue
 import argparse
 import textwrap
 import xml.etree.ElementTree as ET
+import sys
 
 
 # TS-890 KNS TCP/IP control port
@@ -78,6 +79,7 @@ class Ts890:
         self._receiver_vfo = None
         self._operating_mode = None
         self._freq_offset = 0
+        self._cw_decoder = False
 
     @property
     def host(self):
@@ -223,6 +225,15 @@ class Ts890:
             bandscope data, in Hz
         '''
         self._freq_offset = hz_offset
+
+    @property
+    def cw_decoder(self):
+        ''' Returns True if the CW decoder output should be shown '''
+        return self._cw_decoder
+    @cw_decoder.setter
+    def cw_decoder(self, enabled):
+        ''' Sets if the CW decoder output should be displayed '''
+        self._cw_decoder = enabled
 
     def has_all_required_info(self):
         ''' Returns True if all the required information
@@ -460,6 +471,14 @@ class Ts890Connection:
                 except ValueError:
                     print(f'error extracting mode from {resp}')
 
+    async def _handle_cat_cd2(self, resp):
+        ''' Handle an CW decoder CD2x; cat response '''
+        if self._ts890.cw_decoder:
+            if len(resp) > 4 and resp[2] == '2':
+                decoded = resp[3:-1]
+                sys.stdout.write(decoded)
+                sys.stdout.flush()
+
     async def _handle_info(self, cat_msg):
         ''' Handle received messages from the TS-890 '''
         # CAT response handlers
@@ -469,7 +488,8 @@ class Ts890Connection:
             'FA': self._handle_cat_fa_fb,
             'FB': self._handle_cat_fa_fb,
             '##DD': self._handle_cat_dd,
-            'OM': self._handle_cat_om
+            'OM': self._handle_cat_om,
+            'CD': self._handle_cat_cd2
         }
         # Non-error messages are at least 3 characters in length
         # "XX...;" or "##XX...;" for LAN commands
@@ -656,6 +676,11 @@ if __name__ == '__main__':
                              default = 0,
                              help = 'Shift the displayed bandscope data by +/- specified Hz')
 
+    TS890_GROUP.add_argument('-c', '--cw-decoder',
+                             dest = 'cw_decoder',
+                             action = 'store_true',
+                             help = 'Display CW decoder output')
+
     ARGS = PARSER.parse_args()
 
     try:
@@ -666,6 +691,7 @@ if __name__ == '__main__':
             ts890_ctx = Ts890(ARGS.ts890, ARGS.user, False, ARGS.password)
         # Set extra parameters and run
         ts890_ctx.frequency_offset = ARGS.freq_offset
+        ts890_ctx.cw_decoder = ARGS.cw_decoder
         asyncio.run(main(ts890_ctx, ARGS.n1mm))
     except KeyboardInterrupt:
         print('\nCaught keyboard interrupt, exiting.\n')
