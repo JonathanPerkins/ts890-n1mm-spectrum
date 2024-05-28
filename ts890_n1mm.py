@@ -9,6 +9,7 @@ and forward to an instance of N1MM+ logger.
 
 import asyncio
 from asyncio import Queue
+from datetime import datetime, timezone
 import argparse
 import textwrap
 import xml.etree.ElementTree as ET
@@ -336,6 +337,59 @@ async def send_to_n1mm(queue: Queue, n1mm_host):
         transport.close()
 
 #--------------------------------------------------------------
+# TS-890 decoder logging class
+#--------------------------------------------------------------
+
+class Ts890DecoderLogging:
+    ''' Class to format and log decoder output '''
+    def __init__(self, use_stdout=True):
+        self._stdout = use_stdout
+        self._last_logged_freq_meg_hz = None
+        self._freq_change_since_last_log = False
+        self._logged_tx = False
+
+    def _utc(self):
+        ''' Helper to return current UTC time string '''
+        return f'{datetime.now(timezone.utc).strftime("%H:%M")}'
+
+    def _freq(self):
+        ''' Helper to return current frequency string '''
+        # Overall width 6 chars, padded to 3 decimal places
+        return f'{self._last_logged_freq_meg_hz:6.3f}'
+
+    def _preamble(self):
+        ''' Returns the logging line preamble string '''
+        return f'[{self._utc()} {self._freq()}]'
+
+    def _write(self, chars):
+        ''' Output characters to desired destinations '''
+        if self._stdout:
+            sys.stdout.write(chars)
+            sys.stdout.flush()
+
+    def decoded(self, text):
+        ''' Handle decoded text '''
+        if (self._freq_change_since_last_log or self._logged_tx) and text != ' ':
+            self._write(f'\n{self._preamble()}: ')
+            self._freq_change_since_last_log = False
+            self._logged_tx = False
+        self._write(text)
+
+    def vfo_update(self, freq_hz):
+        ''' VFO frequency has changed '''
+        # Only log frequency changes at 1 kHz resolution
+        freq = round((freq_hz / 1000000), 3)
+        if freq != self._last_logged_freq_meg_hz:
+            self._last_logged_freq_meg_hz = freq
+            self._freq_change_since_last_log = True
+
+    def tx(self):
+        ''' Rig has transmitted '''
+        if not self._logged_tx:
+            self._write(f'\n{self._preamble()}: --TX--')
+            self._logged_tx = True
+
+#--------------------------------------------------------------
 # TS-890 CAT command helpers
 #--------------------------------------------------------------
 
@@ -360,6 +414,10 @@ class Ts890Connection:
         self._ts890 = ts890
         self._reader = None
         self._writer = None
+        if ts890.cw_decoder:
+            self._decoder = Ts890DecoderLogging()
+        else:
+            self._decoder = None
 
     async def _handle_cat_bs(self, resp):
         ''' Handle a BSx cat response '''
@@ -437,26 +495,28 @@ class Ts890Connection:
         if len(resp) == 4:
             try:
                 self._ts890.receiver_vfo = int(resp[2])
-                # If centre mode is active, make sure we have the
-                # current active VFO frequency.
-                if self._ts890.is_centre_mode:
-                    if self._ts890.vfo_a_active:
-                        await self._send_cmd('FA;')
-                    elif self._ts890.vfo_b_active:
-                        await self._send_cmd('FB;')
+                # Make sure we have the current active VFO frequency.
+                if self._ts890.vfo_a_active:
+                    await self._send_cmd('FA;')
+                elif self._ts890.vfo_b_active:
+                    await self._send_cmd('FB;')
             except ValueError:
                 print(f'error extracting RX from {resp}')
 
     async def _handle_cat_fa_fb(self, resp):
         ''' Handle a FAx or FBx cat response '''
         # Only need VFO freq in bandscope centre mode
-        if self._ts890.is_centre_mode and len(resp) == 14:
+        # or if the decoder is active
+        if (self._ts890.is_centre_mode or self._decoder) and len(resp) == 14:
             # extract carrier frequency
             try:
                 freq_hz = int(resp[2:13])
-                # Calculate and store the bandscope lower and upper frequnencies
-                self._ts890.bs_lower_hz = int(freq_hz - (self._ts890.bs_span_hz/2))
-                self._ts890.bs_upper_hz = int(freq_hz + (self._ts890.bs_span_hz/2))
+                if self._ts890.is_centre_mode:
+                    # Calculate and store the bandscope lower and upper frequnencies
+                    self._ts890.bs_lower_hz = int(freq_hz - (self._ts890.bs_span_hz/2))
+                    self._ts890.bs_upper_hz = int(freq_hz + (self._ts890.bs_span_hz/2))
+                if self._decoder:
+                    self._decoder.vfo_update(freq_hz)
             except ValueError:
                 print(f'error extracting frequency from {resp}')
 
@@ -473,11 +533,16 @@ class Ts890Connection:
 
     async def _handle_cat_cd2(self, resp):
         ''' Handle an CW decoder CD2x; cat response '''
-        if self._ts890.cw_decoder:
+        if self._decoder:
             if len(resp) > 4 and resp[2] == '2':
-                decoded = resp[3:-1]
-                sys.stdout.write(decoded)
-                sys.stdout.flush()
+                chars = resp[3:-1]
+                self._decoder.decoded(chars)
+
+    async def _handle_cat_tx(self, resp):
+        ''' Handle an TX indication TXx; cat response '''
+        # For logging purposes, let the decoder know
+        if self._decoder and len(resp) == 4:
+            self._decoder.tx()
 
     async def _handle_info(self, cat_msg):
         ''' Handle received messages from the TS-890 '''
@@ -489,7 +554,8 @@ class Ts890Connection:
             'FB': self._handle_cat_fa_fb,
             '##DD': self._handle_cat_dd,
             'OM': self._handle_cat_om,
-            'CD': self._handle_cat_cd2
+            'CD': self._handle_cat_cd2,
+            'TX': self._handle_cat_tx
         }
         # Non-error messages are at least 3 characters in length
         # "XX...;" or "##XX...;" for LAN commands
